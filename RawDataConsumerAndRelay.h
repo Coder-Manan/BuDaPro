@@ -57,32 +57,6 @@ namespace data_handling_framework
 
         std::atomic<bool> m_stopped;
 
-        // fetches data from the source and places it in the internal buffer
-        // get_data_fun - should take in a void*, populate the location of
-        //                data into it and return the number of bytes in the packet
-        void m_raw_source_and_internal_queue_coordinator(auto &&get_data_fn, unique_ptr_void buf_ptr)
-        {
-            size_t cur_pkt_size, next_write_idx{0};
-            uint64_t next_seq_num{1};
-
-            while (!m_stopped.load(std::memory_order_relaxed))
-            {
-                cur_pkt_size = get_data_fn(buf_ptr.get());
-                std::unique_lock lock{m_internal_buffer_mutex_arr.at(next_write_idx)};
-                m_internal_buffer.at(next_write_idx).curr_pkt_data_size = cur_pkt_size;
-                memcpy(m_internal_buffer.at(next_write_idx).buf_ptr.get(), buf_ptr.get(), cur_pkt_size);
-                m_internal_buffer.at(next_write_idx).seq_num.store(next_seq_num++, std::memory_order_relaxed);
-            }
-
-            m_new_data_ready_cv_arr.at(next_write_idx).notify_all();
-
-            next_write_idx++;
-            if (next_write_idx == N) [[unlikely]]
-            {
-                next_write_idx = 0;
-            }
-        }
-
         // function that runs on a separate thread, puts data from the source of truth to internal buffer
         // takes a buffer pointer to use between reading from source and writing to internal buffer
         void raw_source_and_internal_queue_coordinator(std::function<size_t(void *)> get_network_data, unique_ptr_void buf_ptr)
