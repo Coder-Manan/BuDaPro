@@ -1,3 +1,5 @@
+#pragma once
+
 #include <condition_variable>
 #include <cstdint>
 #include <shared_mutex>
