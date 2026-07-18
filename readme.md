@@ -33,3 +33,14 @@ This is the relay class. It has an internal struct type called `internal_buffer`
 - `subcribe_to_md` spins up a new thread with a lambda that watches the internal buffer array, copies data into a local buffer, checks for gaps, then gets location of the consumer's buffer and places data in that buffer.
     - The local buffer is used so that if `get_next_data_loc_fn` blocks the worker thread, we do not hold the read lock to the internal buffer array for long
 - Since some consumers can be fast, there are condition variables, one for each index of the internal buffer array, on which the worker threads sleep if new data is not available. The predicate for waking up also includes the `m_stopped` flag so that workers don't keep sleeping when operations stop.
+
+## Next Targets/Goals
+These are the first next TODO steps in planning currently. They are not the end goals of this project, and single sections might be incomplete
+### 1. Benchmarking
+1. Write a sample application that uses this component to distribute real world market data to multiple consumers
+2. Test out performance in cases where single data packets fit on a single cache line vs when they don't
+3. Test out various sizes of internal buffer array of the relay
+
+### 2. Testing different implementation choices
+1. Using `mmap` to get page level memory allocation and dividing it internally
+2. Allowing users to start relay with a mode to wait for all worker threads to consumer data before writing new data in internal buffer array
