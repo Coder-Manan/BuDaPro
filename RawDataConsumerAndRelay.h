@@ -96,7 +96,7 @@ namespace data_handling_framework
         ~RawMarketDataHandler()
         {
             // stop if not already stopped
-            m_stopped = true;
+            m_stopped.store(true, std::memory_order_relaxed);
         }
 
         // called by consumers to register themselves
@@ -124,16 +124,11 @@ namespace data_handling_framework
                             std::shared_lock lk{m_internal_buffer_mutex_arr.at(next_read_idx)};
                             // wake up when we see data with higher seq num or ops have stopped
                             m_new_data_ready_cv_arr.at(next_read_idx).wait(lk, [&]
-                                                                           { return (m_internal_buffer.at(next_read_idx).seq_num.load(std::memory_order_relaxed) >= next_seq_num || m_stopped); });
-                        }
-
-                        if (m_stopped) [[unlikely]]
-                        {
-                            return;
-                        }
-
-                        {
-                            std::shared_lock read_lock(m_internal_buffer_mutex_arr.at(next_read_idx));
+                                                                           { return (m_internal_buffer.at(next_read_idx).seq_num.load(std::memory_order_relaxed) >= next_seq_num || m_stopped.load(std::memory_order_relaxed)); });
+                            if (m_stopped.load(std::memory_order_relaxed)) [[unlikely]]
+                            {
+                                return;
+                            }
                             next_seq_num = m_internal_buffer.at(next_read_idx).seq_num.load(std::memory_order_relaxed) + 1;
                             curr_pkt_size = m_internal_buffer.at(next_read_idx).curr_pkt_data_size;
                             memcpy(internal_buffer.get(), m_internal_buffer.at(next_read_idx).buf_ptr.get(), curr_pkt_size);
@@ -172,12 +167,12 @@ namespace data_handling_framework
             }
 
             m_raw_data_consumer_thread = std::jthread([this, &get_network_data, buf = std::move(buf)]() mutable
-                                                          { raw_source_and_internal_queue_coordinator(get_network_data, std::move(buf)); });
+                                                      { raw_source_and_internal_queue_coordinator(get_network_data, std::move(buf)); });
         }
 
         void stop()
         {
-            m_stopped = true;
+            m_stopped.store(true, std::memory_order_relaxed);
             for (auto &cv : m_new_data_ready_cv_arr)
             {
                 cv.notify_all();
