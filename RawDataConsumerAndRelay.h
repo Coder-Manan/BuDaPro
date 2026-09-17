@@ -18,8 +18,7 @@ namespace data_handling_framework
     class RawDataConsumerAndRelay
     {
 
-        // have separate packets on separate cache lines
-        struct alignas(std::hardware_destructive_interference_size) internal_packet
+        struct internal_packet
         {
             // to enable consumers to check for any gaps
             seq_num_t seq_num;
@@ -34,17 +33,18 @@ namespace data_handling_framework
                 }
             }
         };
+        using mem_optimized_internal_packet = CacheAccessOptimizedStruct<internal_packet>;
 
         // helper to construct array of internal buffers
         template <size_t... Is>
-        static std::array<internal_packet, N>
+        static std::array<mem_optimized_internal_packet, N>
         make_array(std::index_sequence<Is...>,
                    size_t size)
         {
-            return {(void(Is), internal_packet{size})...};
+            return {(void(Is), mem_optimized_internal_packet{size})...};
         }
 
-        std::array<internal_packet, N> m_internal_buffer_arr;
+        std::array<mem_optimized_internal_packet, N> m_internal_buffer_arr;
         std::array<std::shared_mutex, N> m_internal_buffer_mutex_arr;
         // so that fast consumers do not spin and waste cpu resources
         std::array<std::condition_variable_any, N> m_new_data_ready_cv_arr;
@@ -61,13 +61,15 @@ namespace data_handling_framework
 
         // function that runs on a separate thread, puts data from the source of truth to internal buffer
         // takes a buffer pointer to use between reading from source and writing to internal buffer
-        void raw_source_and_internal_queue_coordinator(std::function<size_t(void *)> get_network_data, unique_ptr_void buf_ptr)
+        template <typename F>
+            requires std::is_invocable_v<F &, void *> && std::is_same_v<std::remove_cvref<std::invoke_result<F &, void *>>, size_t>
+        void raw_source_and_internal_queue_coordinator(F &&get_network_data, unique_ptr_void buf_ptr)
         {
             size_t cur_pkt_size;
             uint64_t next_write_idx{0}, next_seq_num{1};
             while (!m_stopped.load(std::memory_order_relaxed))
             {
-                cur_pkt_size = get_data_fn(buf_ptr.get());
+                cur_pkt_size = get_network_data(buf_ptr.get());
                 {
                     std::unique_lock lock{m_internal_buffer_mutex_arr.at(next_write_idx)};
                     m_internal_buffer.at(next_write_idx).curr_pkt_data_size = cur_pkt_size;
@@ -108,7 +110,7 @@ namespace data_handling_framework
                 [&]()
                 {
                     unique_ptr_void buffer{malloc(m_max_packet_size)};
-                    if (internal_packet == nullptr)
+                    if (buffer == nullptr)
                     {
                         // not throwing an exception, that can cause the whole process to die
                         return false;
